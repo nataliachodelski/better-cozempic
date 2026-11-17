@@ -819,18 +819,23 @@ def get_session_context_window(session_id: str) -> int | None:
 MAX_LINE_BYTES = 10 * 1024 * 1024  # 10MB per-line safety limit
 
 
-def _parse_one_line(raw: str, idx: int) -> Message | None:
+def _parse_one_line(raw: str, idx: int, keep_oversized: bool = True) -> Message | None:
     """Parse a single stripped JSONL line into a Message tuple.
 
-    Returns None if the line is empty or oversized (skip). Matches the
-    behaviour shared by load_messages() and _parse_jsonl_chunk() — both
-    full-read and incremental-read paths route through this helper to
-    guarantee identical byte-length accounting and _parse_error shape.
+    Returns None if the line is empty. A line over MAX_LINE_BYTES is never
+    parsed: with *keep_oversized* (the default, for every path whose messages
+    may be saved) it is returned as an opaque _parse_error wrapper; without it
+    (the read-only incremental scan, which must stay memory-bounded) it is
+    skipped. Matches the behaviour shared by load_messages() and
+    _parse_jsonl_chunk() — both full-read and incremental-read paths route
+    through this helper to guarantee identical byte-length accounting and
+    _parse_error shape.
     """
     stripped = raw.strip()
     if not stripped:
         return None
-    if len(stripped) > MAX_LINE_BYTES:
+    oversized = len(stripped) > MAX_LINE_BYTES
+    if oversized and not keep_oversized:
         print(
             f"  Warning: skipping oversized line {idx} ({len(stripped)} bytes)",
             file=sys.stderr,
@@ -840,6 +845,16 @@ def _parse_one_line(raw: str, idx: int) -> Message | None:
     # to surrogates) must re-encode with the SAME handler to recover the true byte
     # length — strict encode would raise on the surrogate.
     byte_len = len(stripped.encode("utf-8", "surrogateescape"))
+    if oversized:
+        # Too large to parse, but never dropped: a skipped line was missing from
+        # the list a prune saves, so the save deleted the record from the live
+        # transcript and orphaned its child's parentUuid. As an opaque wrapper it
+        # is written back verbatim (save_messages honors _raw) and never pruned.
+        print(
+            f"  Warning: not parsing oversized line {idx} ({len(stripped)} bytes); kept verbatim",
+            file=sys.stderr,
+        )
+        return (idx, {"_raw": stripped, "_parse_error": True}, byte_len)
     try:
         obj = json.loads(stripped)
     except json.JSONDecodeError:
@@ -1049,7 +1064,8 @@ def _parse_jsonl_chunk(
 
     Empty lines advance the line counter but are not emitted (matches
     load_messages behaviour). Oversized lines are warned and skipped but
-    still consume a line index.
+    still consume a line index: this read-only path never saves, and keeping
+    them would hold multi-MB strings in the incremental cache.
     """
     out: list[Message] = []
     lines_consumed = 0
@@ -1058,7 +1074,7 @@ def _parse_jsonl_chunk(
     # this read-only incremental path consistent with load_messages().
     for offset, raw in enumerate(_split_physical_lines(chunk)):
         lines_consumed += 1
-        parsed = _parse_one_line(raw, start_line_index + offset)
+        parsed = _parse_one_line(raw, start_line_index + offset, keep_oversized=False)
         if parsed is not None:
             out.append(parsed)
     return out, lines_consumed
