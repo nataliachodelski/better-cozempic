@@ -16,7 +16,7 @@ from .doctor import run_doctor
 from .executor import execute_actions, run_prescription
 from .guard import checkpoint_team, start_guard, start_guard_daemon
 from .helpers import (
-    is_ssh_session, shell_quote,
+    is_ssh_session, macos_resume_command, shell_quote,
     compile_protect_patterns, tag_pattern_matches, strip_pattern_tags,
 )
 from .init import global_init_marker_path, project_uninstall_marker, run_init
@@ -974,10 +974,7 @@ def _spawn_watcher(claude_pid: int, project_dir: str, recap_path: Path | None = 
 
     if system == "Darwin":
         inner_cmd = f"cd {shell_quote(project_dir)} && {recap_cmd}claude {resume_flag}"
-        resume_cmd = (
-            f"osascript -e 'tell application \"Terminal\" to do script "
-            f"\"{inner_cmd}\"'"
-        )
+        resume_cmd = macos_resume_command(inner_cmd)
     elif system == "Linux":
         inner_cmd = f"cd {shell_quote(project_dir)} && {recap_cmd}claude {resume_flag}; exec bash"
         resume_cmd = (
