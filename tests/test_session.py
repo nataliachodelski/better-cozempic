@@ -137,15 +137,17 @@ class TestGetClaudeJsonPath:
 
 
 class TestLoadMessagesLimits:
-    def test_skips_oversized_lines(self, tmp_path):
-        """Lines exceeding MAX_LINE_BYTES are silently skipped."""
+    def test_keeps_oversized_lines_unparsed(self, tmp_path):
+        """Lines exceeding MAX_LINE_BYTES are not parsed but kept as opaque
+        _parse_error wrappers, so a save writes them back instead of dropping them."""
         jsonl = tmp_path / "test.jsonl"
         normal = json.dumps({"role": "user", "content": "hello"})
         oversized = json.dumps({"role": "user", "content": "x" * (MAX_LINE_BYTES + 1)})
         jsonl.write_text(normal + "\n" + oversized + "\n")
         messages = load_messages(jsonl)
-        assert len(messages) == 1
+        assert len(messages) == 2
         assert messages[0][1]["content"] == "hello"
+        assert messages[1][1] == {"_raw": oversized, "_parse_error": True}
 
     def test_normal_lines_unaffected(self, tmp_path):
         """Normal-sized lines parse correctly."""
