@@ -488,6 +488,45 @@ def shell_quote(s: str) -> str:
     return "'" + s.replace("'", "'\\''") + "'"
 
 
+_ITERM_NAMES = frozenset({"iterm", "iterm2", "iterm.app"})
+_TERMINAL_NAMES = frozenset({"terminal", "terminal.app", "apple_terminal"})
+
+
+def macos_terminal_app() -> str:
+    """Return the macOS app auto-resume reopens Claude in: "iTerm" or "Terminal".
+
+    `COZEMPIC_TERMINAL=iterm|terminal` wins when set. Otherwise the session's own
+    terminal decides: iTerm sets `TERM_PROGRAM=iTerm.app`, and the guard daemon and
+    `cozempic reload` both inherit it from Claude. Checking which apps are installed
+    (as on Linux) does not work here: Terminal.app is always installed. Anything else,
+    including a session with no terminal of its own, keeps the Terminal default.
+    """
+    import os
+    choice = os.environ.get("COZEMPIC_TERMINAL", "").strip().lower()
+    if choice in _ITERM_NAMES:
+        return "iTerm"
+    if choice in _TERMINAL_NAMES:
+        return "Terminal"
+    return "iTerm" if os.environ.get("TERM_PROGRAM") == "iTerm.app" else "Terminal"
+
+
+def macos_resume_command(inner_cmd: str) -> str:
+    """Return a shell command that opens a new macOS terminal window running *inner_cmd*.
+
+    *inner_cmd* is embedded as an AppleScript string literal and the whole script is
+    shell-quoted once, so quotes and spaces in it (a shell-quoted project path) survive.
+    """
+    literal = '"' + inner_cmd.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    if macos_terminal_app() == "iTerm":
+        script = (
+            'tell application "iTerm" to tell current session of '
+            f"(create window with default profile) to write text {literal}"
+        )
+    else:
+        script = f'tell application "Terminal" to do script {literal}'
+    return f"osascript -e {shell_quote(script)}"
+
+
 def is_ssh_session() -> bool:
     """Detect if we're running inside an SSH session."""
     import os

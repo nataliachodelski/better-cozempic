@@ -240,6 +240,7 @@ from .helpers import (
     hashable_str,
     _pid_is_alive as _pid_is_alive_canonical,
     is_ssh_session,
+    macos_resume_command,
     shell_quote,
     tag_pattern_matches,
     strip_pattern_tags,
@@ -2656,10 +2657,7 @@ def _spawn_reload_watcher(claude_pid: int, project_dir: str, session_id: str | N
         pgrep_pattern = "claude"
 
     if system == "Darwin":
-        resume_cmd = (
-            f"osascript -e 'tell application \"Terminal\" to do script "
-            f"\"cd {shell_quote(project_dir)} && claude {resume_flag}\"'"
-        )
+        resume_cmd = macos_resume_command(f"cd {shell_quote(project_dir)} && claude {resume_flag}")
     elif system == "Linux":
         resume_cmd = (
             f"if command -v gnome-terminal >/dev/null 2>&1; then "
